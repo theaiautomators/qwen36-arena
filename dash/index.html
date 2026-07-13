@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qwen3.6 — NVFP4 vs GGUF, one clock</title>
+<style>
+  :root {
+    --ink:#0B0D14; --ink-2:#10131D; --ink-3:#171B28; --line:#262C3D; --line-2:#333A4F;
+    --text:#E7EAF3; --muted:#949BB2; --dim:#5A6178;
+    --blue:#4D6BFE; --blue-2:#6E8BFF; --sky:#56C6F5; --violet:#9E86FF;
+    --gold:#F5B942; --gold-2:#FFD37A; --good:#41D19B;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 82% -10%, rgba(245,185,66,0.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(77,107,254,0.10), transparent 55%),
+      var(--ink);
+    color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased;
+    padding:clamp(16px,2.4vw,32px);
+  }
+  .shell { max-width:1280px; margin:0 auto; }
+
+  header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-wrap:wrap; margin-bottom:18px; }
+  .brand .eyebrow { font-family:var(--mono); font-size:11.5px; letter-spacing:0.22em; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; gap:10px; margin:0 0 8px; }
+  .brand .eyebrow .dot { width:7px; height:7px; border-radius:50%; background:var(--gold); box-shadow:0 0 10px var(--gold); }
+  .brand h1 { font-family:var(--mono); font-weight:600; font-size:clamp(22px,2.9vw,32px); letter-spacing:-0.02em; margin:0; }
+  .brand h1 .hl { color:var(--gold); }
+  .lanes { display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
+  .lanechip { font-family:var(--mono); font-size:11.5px; color:var(--dim); display:flex; align-items:center; gap:7px; }
+  .lanechip .led { width:8px; height:8px; border-radius:50%; background:var(--dim); }
+  .lanechip.live { color:var(--text); }
+  .lanechip.live .led { background:var(--good); box-shadow:0 0 9px var(--good); }
+
+  .controls { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; background:var(--ink-2); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:14px; }
+  .controls .grow { flex:1 1 300px; min-width:220px; }
+  .controls label { font-family:var(--mono); font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:6px; }
+  .controls textarea, .controls input, .controls select {
+    width:100%; background:var(--ink); color:var(--text); border:1px solid var(--line-2); border-radius:9px;
+    font-family:var(--sans); font-size:13.5px; padding:9px 11px; resize:vertical;
+  }
+  .controls textarea { min-height:44px; line-height:1.4; }
+  .controls .field.small { width:96px; flex:0 0 auto; }
+  .controls .field.mid { width:120px; flex:0 0 auto; }
+  .presets { flex:1 1 100%; }
+  .presets .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .presets button.chip {
+    font-size:11.5px; font-weight:600; padding:7px 12px; border-radius:20px;
+    background:var(--ink); border:1px solid var(--line-2); color:var(--muted);
+  }
+  .presets button.chip:hover:not(:disabled) { background:var(--ink-3); color:var(--text); }
+  .presets button.chip.active { color:var(--gold-2); border-color:var(--gold); background:rgba(245,185,66,0.08); }
+  .presets button.chip .hint { font-weight:400; color:var(--dim); margin-left:6px; }
+  button {
+    font-family:var(--mono); font-size:13px; font-weight:600; letter-spacing:0.02em;
+    border:1px solid var(--line-2); border-radius:9px; padding:11px 16px; cursor:pointer;
+    background:var(--ink-3); color:var(--text); transition:transform .08s ease, background .15s ease, opacity .15s ease;
+  }
+  button:hover:not(:disabled) { background:#20263a; }
+  button:active:not(:disabled) { transform:translateY(1px); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:linear-gradient(180deg,#5a76ff,var(--blue)); border-color:transparent; color:#fff; }
+  button.gold { background:linear-gradient(180deg,var(--gold-2),var(--gold)); border-color:transparent; color:#241a05; }
+  button.ghost { background:transparent; color:var(--dim); border-color:var(--line); padding:6px 10px; font-size:11px; }
+  button:focus-visible { outline:2px solid var(--blue-2); outline-offset:2px; }
+
+  .status { font-family:var(--mono); font-size:12px; color:var(--muted); min-height:18px; margin:2px 2px 16px; }
+  .status .clk { color:var(--gold); }
+  .status b { color:var(--text); }
+  .status.err { color:#ff8a8a; }
+
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+  .pane { background:linear-gradient(180deg,var(--ink-3),var(--ink-2)); border:1px solid var(--line); border-radius:16px; padding:16px; display:flex; flex-direction:column; transition:border-color .2s ease, box-shadow .2s ease; }
+  .pane[data-state="running"], .pane[data-state="racing"] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 0 26px -6px var(--accent); }
+  .pane[data-state="done"] { border-color:var(--line-2); }
+  .pane.win { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold), 0 0 30px -6px rgba(245,185,66,.5); }
+
+  .pane .top { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .pane .who { font-family:var(--mono); font-size:16px; font-weight:600; color:var(--accent); }
+  .pane .role { font-family:var(--mono); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--dim); }
+  .pill { font-family:var(--mono); font-size:9.5px; letter-spacing:0.10em; text-transform:uppercase; padding:3px 8px; border-radius:20px; border:1px solid var(--line-2); color:var(--muted); white-space:nowrap; }
+  .pane[data-state="running"] .pill, .pane[data-state="racing"] .pill { color:var(--accent); border-color:var(--accent); }
+  .pane[data-state="done"] .pill { color:var(--good); border-color:rgba(65,209,155,.4); }
+
+  .readout { display:flex; align-items:baseline; gap:8px; margin:14px 0 4px; }
+  .readout .tps { font-family:var(--mono); font-weight:600; font-size:34px; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1; color:var(--text); }
+  .readout .unit { font-family:var(--mono); font-size:12px; color:var(--dim); }
+  .readout .meta { margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; text-align:right; }
+  .readout .meta b { color:var(--text); font-weight:600; }
+
+  .bar { height:6px; background:var(--ink); border-radius:4px; overflow:hidden; margin:10px 0 12px; }
+  .bar > i { display:block; height:100%; width:0; background:var(--accent); border-radius:4px; transition:width .12s linear; }
+
+  .stream { background:#080A10; border:1px solid var(--line); border-radius:10px; padding:11px 12px; overflow-y:auto; height:200px; min-height:200px;
+            font-family:var(--mono); font-size:12px; line-height:1.5; color:#C7CBD9; white-space:pre-wrap; word-break:break-word; }
+  .stream .new { background:color-mix(in srgb, var(--accent) 34%, transparent); border-radius:2px; animation:fade 700ms ease forwards; }
+  @keyframes fade { to { background:transparent; } }
+  .stream::-webkit-scrollbar { width:8px; } .stream::-webkit-scrollbar-thumb { background:var(--line-2); border-radius:8px; }
+
+  .rank b { color:var(--gold); }
+
+  .results { margin-top:18px; background:var(--ink-2); border:1px solid var(--line); border-radius:16px; padding:18px 18px 20px; display:none; }
+  .results.show { display:block; }
+  .rgroup { margin-bottom:20px; }
+  .rgroup:last-child { margin-bottom:0; }
+  .rgroup h2 { font-family:var(--mono); font-size:13px; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); margin:0 0 4px; }
+  .rgroup .sub { font-size:11.5px; color:var(--dim); margin:0 0 14px; }
+  .rgroup .sub b { color:var(--gold-2); font-weight:600; }
+  .lane { display:grid; grid-template-columns:150px 1fr 150px; align-items:center; gap:16px; margin-bottom:10px; }
+  .lane .lb { font-family:var(--mono); font-size:13px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lane .trk { position:relative; height:24px; background:var(--ink); border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .lane .trk > i { position:absolute; inset:0 auto 0 0; width:0; border-radius:6px; transition:width .9s cubic-bezier(.22,.61,.36,1); }
+  .lane .rd { font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right; font-size:13px; color:var(--muted); }
+  .lane .rd b { font-size:18px; color:var(--text); }
+
+  .benchbox { margin-top:18px; background:var(--ink-2); border:1px solid var(--line); border-radius:16px; padding:18px; display:none; }
+  .benchbox.show { display:block; }
+  .benchbox h2 { font-family:var(--mono); font-size:13px; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); margin:0 0 4px; }
+  .benchbox .sub { font-size:11.5px; color:var(--dim); margin:0 0 12px; }
+  table.bench { border-collapse:collapse; width:100%; font-family:var(--mono); font-size:12px; }
+  table.bench th, table.bench td { text-align:right; padding:6px 10px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  table.bench th { color:var(--dim); font-weight:500; text-transform:uppercase; font-size:10px; letter-spacing:0.08em; }
+  table.bench td:first-child, table.bench th:first-child { text-align:left; }
+  table.bench td.k { color:var(--gold-2); }
+  table.bench td b { color:var(--text); }
+
+  footer { margin-top:20px; font-family:var(--mono); font-size:11px; color:var(--dim); letter-spacing:.03em; display:flex; gap:10px; flex-wrap:wrap; }
+  footer .sep { color:var(--line-2); }
+
+  @media (max-width:820px){ .grid { grid-template-columns:1fr; } }
+  @media (prefers-reduced-motion:reduce){ .stream .new { animation:none; } .lane .trk > i { transition:none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand">
+      <p class="eyebrow"><span class="dot"></span> Qwen3.6 &nbsp;/&nbsp; NVFP4 vs GGUF &nbsp;/&nbsp; RTX 5090 &nbsp;/&nbsp; live</p>
+      <h1>One GPU, two engines, <span class="hl">same clock</span></h1>
+    </div>
+    <div class="lanes">
+      <div class="lanechip" id="chipVllm"><span class="led"></span><span>vLLM :8000 — down</span></div>
+      <div class="lanechip" id="chipGguf"><span class="led"></span><span>llama.cpp :8872 — down</span></div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="presets">
+      <label>Task presets <span style="color:var(--dim);text-transform:none;letter-spacing:0">(same three as the DSpark video)</span></label>
+      <div class="row" id="presetRow"></div>
+    </div>
+    <div class="grow">
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt"></textarea>
+    </div>
+    <div class="field small">
+      <label for="tokens">Max tokens</label>
+      <input id="tokens" type="number" value="256" min="16" max="4096" step="16">
+    </div>
+    <div class="field mid">
+      <label for="repeats">Timing</label>
+      <select id="repeats">
+        <option value="1">single run</option>
+        <option value="2" selected>best of 2</option>
+        <option value="3">best of 3</option>
+      </select>
+    </div>
+    <div class="field small">
+      <label for="replaySpeed">Replay</label>
+      <select id="replaySpeed">
+        <option value="1">1× real</option>
+        <option value="2">2× fast</option>
+        <option value="4">4× fast</option>
+      </select>
+    </div>
+    <button id="startBtn" class="primary">▶ Race this lane</button>
+    <button id="replayBtn" class="gold" disabled>⟲ Replay side-by-side</button>
+    <button id="clearBtn" class="ghost" title="forget all recorded races">✕ clear recordings</button>
+  </div>
+
+  <div class="status" id="status">connecting…</div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="results" id="results">
+    <div class="rgroup">
+      <h2>Decode tok/s</h2>
+      <p class="sub">tokens/sec after the first token (cache-immune, what streaming feels like) — best recorded run per lane<span id="tpsNote"></span></p>
+      <div id="tpsLanes"></div>
+    </div>
+    <div class="rgroup">
+      <h2>Time to first token</h2>
+      <p class="sub">seconds from send to first content (run 1 of each recording = cold) · <b>shorter is better</b></p>
+      <div id="ttftLanes"></div>
+    </div>
+  </div>
+
+  <div class="benchbox" id="benchbox">
+    <h2>Scripted battery (qwen36.cmd bench)</h2>
+    <p class="sub">best row per lane × preset — the numbers for the report, from results\bench-results.json</p>
+    <div style="overflow-x:auto"><table class="bench" id="benchTable"></table></div>
+  </div>
+
+  <footer>
+    <span>greedy · thinking off · single stream · client-side clock</span><span class="sep">·</span>
+    <span>one lane on the GPU at a time — recordings race in Replay</span><span class="sep">·</span>
+    <span>unsloth W4A4 vs NVIDIA W4A16 vs UD-Q4_K_XL</span>
+  </footer>
+</div>
+
+<script>
+// ---- lane identity: key = "<lane>-<size>[-mtpN]" from qwen36.cmd ----
+function meta(key){
+  const mtp = (key.match(/-mtp(\d+)/) || [])[1];
+  const tag = mtp ? " · MTP " + mtp : "";
+  if (key.startsWith("nvfp4")) return { role:"vLLM · Unsloth W4A4"+tag,            accent: mtp ? "var(--gold-2)" : "var(--gold)",  hex: mtp ? "#FFD37A" : "#F5B942" };
+  if (key.startsWith("w4a16")) return { role:"vLLM · NVIDIA W4A16 · claim baseline"+tag, accent:"var(--muted)",                    hex:"#949BB2" };
+  if (key.startsWith("gguf"))  return { role:"llama.cpp · UD-Q4_K_XL"+tag,          accent: mtp ? "var(--sky)" : "var(--blue-2)",   hex: mtp ? "#56C6F5" : "#6E8BFF" };
+  return { role:"lane", accent:"var(--violet)", hex:"#9E86FF" };
+}
+
+const PRESETS = [
+  { label:"⌨ Code", hint:"the agent workload",
+    prompt:"Write a Python function that returns the longest palindromic substring " +
+           "of a given string. Include a brief explanation of the algorithm and one example.", tokens:256 },
+  { label:"∑ Math", hint:"predictable output",
+    prompt:"A bakery sells muffins for $2.50 each and cookies for $1.25 each. On Monday " +
+           "it sold 48 muffins and twice as many cookies as muffins. How much money did " +
+           "the bakery make in total on Monday? Show your reasoning step by step.", tokens:256 },
+  { label:"💬 Open chat", hint:"hard mode for MTP",
+    prompt:"What are the main pros and cons of remote work for early-career software " +
+           "engineers? Give a balanced, conversational answer.", tokens:256 },
+];
+const DEFAULT_PROMPT = PRESETS[0].prompt;
+
+const grid = document.getElementById("grid");
+const statusEl = document.getElementById("status");
+const startBtn = document.getElementById("startBtn");
+const replayBtn = document.getElementById("replayBtn");
+const resultsEl = document.getElementById("results");
+
+const presetRow = document.getElementById("presetRow");
+const promptEl = document.getElementById("prompt");
+const tokensEl = document.getElementById("tokens");
+function applyPreset(p, btn){
+  promptEl.value = p.prompt;
+  tokensEl.value = p.tokens;
+  presetRow.querySelectorAll(".chip").forEach(b => b.classList.toggle("active", b === btn));
+}
+PRESETS.forEach((p, i) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip"; b.title = p.prompt;
+  b.innerHTML = p.label + '<span class="hint">' + p.hint + '</span>';
+  b.addEventListener("click", () => applyPreset(p, b));
+  presetRow.appendChild(b);
+  if (i === 0) applyPreset(p, b);
+});
+[promptEl, tokensEl].forEach(el =>
+  el.addEventListener("input", () =>
+    presetRow.querySelectorAll(".chip").forEach(b => b.classList.remove("active"))));
+
+let maxTokens = 256;
+let timelines = {};   // key -> best run's [{elapsed,text,tokens,tps}]
+let summary = {};     // key -> {tps(wall), decode_tps, ttft, tokens}
+let promptOf = {};    // key -> prompt of the kept recording (replay fairness)
+let paneText = {};
+let replayTimers = [];
+let racing = false;
+
+const panes = {};
+function ensurePane(key){
+  if (panes[key]) return panes[key];
+  const m = meta(key);
+  const el = document.createElement("div");
+  el.className = "pane"; el.dataset.state = "idle";
+  el.style.setProperty("--accent", m.accent);
+  el.innerHTML = `
+    <div class="top">
+      <div><span class="who">${key}</span> <span class="role">${m.role}</span></div>
+      <span class="pill">idle</span>
+    </div>
+    <div class="readout">
+      <span class="tps" data-tps>0</span><span class="unit">tok/s</span>
+      <span class="meta"><b data-count>0</b> tok · <span data-ttft></span> <span class="rank" data-rank></span></span>
+    </div>
+    <div class="bar"><i data-fill></i></div>
+    <div class="stream" data-stream></div>`;
+  grid.appendChild(el);
+  panes[key] = el;
+  return el;
+}
+function q(k, sel){ return panes[k].querySelector(sel); }
+function setState(k, s){ panes[k].dataset.state = s; q(k,".pill").textContent = s; }
+function resetStream(k){
+  q(k,"[data-stream]").innerHTML = "";
+  q(k,"[data-tps]").textContent = "0";
+  q(k,"[data-count]").textContent = "0";
+  q(k,"[data-fill]").style.width = "0%";
+  paneText[k] = "";
+}
+function pushText(k, fullText){
+  const stream = q(k,"[data-stream]");
+  const prev = paneText[k] || "";
+  if (fullText.startsWith(prev)) {
+    const delta = fullText.slice(prev.length);
+    if (delta) { const span=document.createElement("span"); span.className="new"; span.textContent=delta; stream.appendChild(span); }
+  } else { stream.textContent = fullText; }
+  paneText[k] = fullText;
+  stream.scrollTop = stream.scrollHeight;
+}
+function updatePane(k, evt){
+  q(k,"[data-tps]").textContent = Math.round(evt.tps);
+  q(k,"[data-count]").textContent = evt.tokens;
+  q(k,"[data-fill]").style.width = Math.min(100, 100*evt.tokens/maxTokens) + "%";
+  pushText(k, evt.text);
+}
+function seedRecording(key, rec){
+  ensurePane(key);
+  timelines[key] = rec.timeline;
+  summary[key] = rec.summary;
+  promptOf[key] = rec.prompt;
+  setState(key, "done");
+  q(key,"[data-tps]").textContent = Math.round(rec.summary.decode_tps);
+  q(key,"[data-count]").textContent = rec.summary.tokens;
+  q(key,"[data-ttft]").textContent = "ttft " + rec.summary.ttft.toFixed(2) + "s";
+  q(key,"[data-fill]").style.width = "100%";
+  q(key,"[data-rank]").innerHTML = "recorded · best of " + (rec.summary.repeats || 1);
+  pushText(key, rec.timeline.length ? rec.timeline[rec.timeline.length-1].text : "");
+}
+
+// ---- SSE ----
+const es = new EventSource("/events");
+es.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
+
+function handle(m){
+  if (m.type === "restore") {
+    for (const [key, rec] of Object.entries(m.races || {})) seedRecording(key, rec);
+    if (Object.keys(timelines).length) replayBtn.disabled = false;
+    if (Object.keys(summary).length > 1) renderResults();
+    return;
+  }
+  if (m.regime) ensurePane(m.regime);
+  if (m.type === "run_start") {
+    racing = true;
+    maxTokens = m.max_new_tokens || 256;
+    const k = m.regimes[0];
+    delete timelines[k]; delete summary[k];
+    resetStream(k); setState(k, "queued");
+    q(k,"[data-rank]").textContent = ""; q(k,"[data-ttft]").textContent = "";
+    Object.values(panes).forEach(p => p.classList.remove("win"));
+    resultsEl.classList.remove("show");
+    startBtn.disabled = true; replayBtn.disabled = true;
+    statusEl.classList.remove("err");
+    statusEl.innerHTML = "Racing <b>" + k + "</b> · best of " + m.repeats + " …";
+  } else if (m.type === "repeat_start") {
+    resetStream(m.regime);
+    panes[m.regime].dataset.state = "running";
+    q(m.regime,".pill").textContent = m.total > 1 ? ("run " + (m.index+1) + "/" + m.total) : "running";
+  } else if (m.type === "tokens") {
+    updatePane(m.regime, m);
+  } else if (m.type === "repeat_done") {
+    q(m.regime,"[data-rank]").innerHTML = "run " + (m.index+1) + ": " + Math.round(m.decode_tps) + " tok/s";
+  } else if (m.type === "regime_done") {
+    setState(m.regime, "done");
+    summary[m.regime] = m;
+    q(m.regime,"[data-tps]").textContent = Math.round(m.decode_tps);
+    q(m.regime,"[data-count]").textContent = m.tokens;
+    q(m.regime,"[data-ttft]").textContent = "ttft " + m.ttft.toFixed(2) + "s";
+    q(m.regime,"[data-fill]").style.width = "100%";
+    q(m.regime,"[data-rank]").innerHTML = "best of " + m.repeats +
+      (m.tokens_estimated ? " · <b>count est.</b>" : "");
+  } else if (m.type === "run_done") {
+    racing = false;
+    startBtn.disabled = false; replayBtn.disabled = Object.keys(timelines).length === 0;
+    refreshState(true);   // re-pull recordings (the server just saved one) + coach line
+  } else if (m.type === "error") {
+    racing = false;
+    statusEl.classList.add("err");
+    statusEl.textContent = "Error: " + m.message;
+    startBtn.disabled = false; replayBtn.disabled = Object.keys(timelines).length === 0;
+  }
+}
+
+// ---- /state poll: lane chips + coach line + bench table ----
+const chipV = document.getElementById("chipVllm"), chipG = document.getElementById("chipGguf");
+function coach(st){
+  if (racing) return;
+  const upKey = st.lane && ((st.lane.engine === "vllm" && st.up.vllm) || (st.lane.engine === "llamacpp" && st.up.llamacpp))
+    ? st.lane.lane + "-" + st.lane.size + (st.lane.mtp ? "-mtp" + st.lane.mtp : "") : null;
+  const rec = Object.keys(timelines);
+  if (!upKey) {
+    statusEl.innerHTML = "No lane answering — serve one: <b>qwen36.cmd nvfp4 27b</b> · <b>qwen36.cmd gguf 27b</b> [mtp N] · <b>qwen36.cmd w4a16</b>" +
+      (rec.length ? " — " + rec.length + " recording(s) ready to Replay." : "");
+    return;
+  }
+  if (!rec.includes(upKey)) {
+    statusEl.innerHTML = "Lane <b>" + upKey + "</b> live — <b>▶ Race this lane</b> records it" +
+      (rec.length ? ", then Replay races it against: " + rec.map(r=>"<b>"+r+"</b>").join(", ") + " (same prompt!)." : ".");
+  } else {
+    const others = rec.filter(r => r !== upKey);
+    statusEl.innerHTML = "<b>" + upKey + "</b> recorded. " + (others.length
+      ? "Replay races: " + rec.map(r=>"<b>"+r+"</b>").join(" vs ") + ". For another lane: <b>qwen36.cmd stop</b> → serve it → race the same prompt."
+      : "Now swap: <b>qwen36.cmd stop</b> → <b>qwen36.cmd " + (upKey.startsWith("gguf") ? "nvfp4 27b" : "gguf 27b") + "</b> → race the <b>same prompt</b> → Replay.");
+  }
+}
+async function refreshState(reloadRaces){
+  try {
+    const st = await (await fetch("/state")).json();
+    chipV.classList.toggle("live", !!st.up.vllm);
+    chipG.classList.toggle("live", !!st.up.llamacpp);
+    const laneTag = k => st.lane && st.lane.engine === k && st.up[k]
+      ? " — " + st.lane.lane + "-" + st.lane.size + (st.lane.mtp ? "-mtp" + st.lane.mtp : "") : "";
+    chipV.lastElementChild.textContent = "vLLM :8000" + (st.up.vllm ? " — live" + laneTag("vllm") : " — down");
+    chipG.lastElementChild.textContent = "llama.cpp :8872" + (st.up.llamacpp ? " — live" + laneTag("llamacpp") : " — down");
+    if (reloadRaces) {
+      const races = st.races || {};
+      // seed summaries only (timelines come via SSE restore on connect; after a
+      // live run the timeline is already client-side)
+      renderResults();
+    }
+    renderBench(st.bench);
+    coach(st);
+  } catch {}
+}
+setInterval(refreshState, 3000);
+refreshState();
+
+// ---- results ----
+function pickBaseline(keys){
+  const size = k => (k.match(/-(\d+b)/) || [,""])[1];
+  const sizes = [...new Set(keys.map(size))];
+  const sz = sizes.length === 1 ? sizes[0] : "27b";
+  return keys.find(k => k === "w4a16-" + sz) ||
+         keys.find(k => k === "gguf-" + sz) ||
+         keys.slice().sort((a,b)=>summary[a].decode_tps-summary[b].decode_tps)[0];
+}
+function fillLanes(id, sortedKeys, fn){
+  const host = document.getElementById(id); host.innerHTML = "";
+  for (const k of sortedKeys){
+    const d = fn(k);
+    const lane = document.createElement("div");
+    lane.className = "lane";
+    lane.innerHTML = `<div class="lb">${k}</div>
+      <div class="trk"><i style="background:${meta(k).hex}"></i></div>
+      <div class="rd"><b>${d.val}</b> · ${d.sub}</div>`;
+    host.appendChild(lane);
+    requestAnimationFrame(()=>{ lane.querySelector("i").style.width = d.barPct + "%"; });
+  }
+}
+function renderResults(){
+  const ks = Object.keys(summary);
+  if (ks.length < 1) return;
+  const base = pickBaseline(ks);
+  const maxTps = Math.max(...ks.map(k => summary[k].decode_tps));
+  fillLanes("tpsLanes", [...ks].sort((a,b)=>summary[b].decode_tps-summary[a].decode_tps), k => ({
+    barPct: 100*summary[k].decode_tps/maxTps,
+    val: Math.round(summary[k].decode_tps),
+    sub: k === base ? "baseline" : (summary[k].decode_tps/summary[base].decode_tps).toFixed(2) + "×",
+  }));
+  const maxT = Math.max(...ks.map(k => summary[k].ttft));
+  fillLanes("ttftLanes", [...ks].sort((a,b)=>summary[a].ttft-summary[b].ttft), k => ({
+    barPct: 100*summary[k].ttft/maxT,
+    val: summary[k].ttft.toFixed(2) + "s",
+    sub: "cold",
+  }));
+  document.getElementById("tpsNote").textContent =
+    " · × vs " + base + (base.startsWith("w4a16") ? " (the 2.5× claim's own baseline)" : "");
+  resultsEl.classList.add("show");
+}
+
+// ---- bench table ----
+function renderBench(rows){
+  const box = document.getElementById("benchbox");
+  if (!rows || !rows.length) { box.classList.remove("show"); return; }
+  const best = {};
+  for (const r of rows){
+    const id = r.key + "|" + r.preset + "|" + r.max_tokens;
+    if (!best[id] || r.wall_tps > best[id].wall_tps) best[id] = r;
+  }
+  const list = Object.values(best).sort((a,b)=> a.key.localeCompare(b.key) || a.preset.localeCompare(b.preset));
+  let html = "<tr><th>lane</th><th>preset</th><th>max tok</th><th>ttft s</th><th>decode tok/s</th><th>wall tok/s</th></tr>";
+  for (const r of list){
+    html += `<tr><td class="k">${r.key}</td><td>${r.preset}</td><td>${r.max_tokens}</td>` +
+            `<td>${r.ttft.toFixed(2)}</td><td><b>${r.decode_tps.toFixed(1)}</b></td><td>${r.wall_tps.toFixed(1)}</td></tr>`;
+  }
+  document.getElementById("benchTable").innerHTML = html;
+  box.classList.add("show");
+}
+
+// ---- start / replay / clear ----
+startBtn.addEventListener("click", () => {
+  fetch("/start", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+    prompt: promptEl.value.trim() || DEFAULT_PROMPT,
+    max_new_tokens: parseInt(tokensEl.value) || 256,
+    repeats: parseInt(document.getElementById("repeats").value) || 2,
+  })}).then(r=>r.json()).then(d=>{
+    if (!d.started){ statusEl.classList.add("err"); statusEl.textContent = d.error || "could not start"; }
+  }).catch(()=>{ statusEl.classList.add("err"); statusEl.textContent = "Could not reach the dashboard server."; });
+});
+
+replayBtn.addEventListener("click", () => {
+  replayTimers.forEach(t => (typeof t === "object" && t.clear) ? t.clear() : clearTimeout(t));
+  replayTimers = [];
+  const speed = parseFloat(document.getElementById("replaySpeed").value) || 1;
+  let finished = 0;
+  const racers = Object.keys(timelines).filter(k => timelines[k] && timelines[k].length);
+  racers.forEach(k => { ensurePane(k); resetStream(k); setState(k,"racing"); panes[k].classList.remove("win"); q(k,"[data-rank]").textContent=""; });
+  resultsEl.classList.remove("show");
+  const t0 = performance.now();
+  const clockTimer = setInterval(()=>{
+    statusEl.innerHTML = 'Racing… <span class="clk">' + ((performance.now()-t0)/1000*speed).toFixed(1) + 's</span> (' + speed + '×)';
+  }, 60);
+  replayTimers.push({clear:()=>clearInterval(clockTimer)});
+  let maxDur = 0;
+  for (const k of racers){
+    const tl = timelines[k];
+    maxDur = Math.max(maxDur, tl[tl.length-1].elapsed);
+    for (const snap of tl){
+      replayTimers.push(setTimeout(()=>updatePane(k, snap), snap.elapsed*1000/speed));
+    }
+    const finT = tl[tl.length-1].elapsed;
+    replayTimers.push(setTimeout(()=>{
+      setState(k,"done"); finished++;
+      const medal = ["🥇 1st","🥈 2nd","🥉 3rd","4th","5th"][finished-1] || (finished+"th");
+      q(k,"[data-rank]").innerHTML = '<b>'+medal+'</b> · '+finT.toFixed(1)+'s';
+      if (finished===1) panes[k].classList.add("win");
+    }, finT*1000/speed));
+  }
+  const mixedPrompts = new Set(racers.map(k => promptOf[k]).filter(Boolean)).size > 1;
+  replayTimers.push(setTimeout(()=>{
+    clearInterval(clockTimer);
+    statusEl.innerHTML = mixedPrompts
+      ? "Race complete — <b>⚠ recordings used different prompts</b>; re-race each lane on one prompt for a fair side-by-side."
+      : "Race complete — same prompt, same GPU, different lane.";
+    renderResults();
+  }, maxDur*1000/speed + 250));
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  if (!confirm("Forget all recorded races? (deletes results\\races\\*.json)")) return;
+  fetch("/clear", {method:"POST"}).then(()=>location.reload());
+});
+</script>
+</body>
+</html>

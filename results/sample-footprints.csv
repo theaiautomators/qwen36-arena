@@ -1,0 +1,14 @@
+phase,lane,depth,mem_used_mib,sm_clock_mhz,mem_clock_mhz,temp_c
+bookendA,nvfp4,2,29959, 412, 405, 43
+sweep,nvfp4,1,29830, 360, 405, 44
+sweep,nvfp4,3,30138, 397, 405, 42
+sweep,nvfp4,4,30163, 360, 405, 45
+sweep,gguf,2,23706, 2797, 7001, 43
+sweep,gguf,1,23109, 352, 810, 49
+sweep,gguf,3,24333, 1005, 7001, 53
+sweep,gguf,4,24922, 2505, 13801, 55
+bookendB,nvfp4,2,29949, 382, 405, 44
+ext,nvfp4,5,30083, 352, 405, 42
+ext,nvfp4,6,30085, 390, 405, 44
+ext,gguf,5,25492, 982, 7001, 42
+ext,gguf,6,26096, 450, 7001, 48
