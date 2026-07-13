@@ -14,8 +14,9 @@ REM mtp N = multi-token-prediction speculative decoding (the solo-speed lever, t
 REM   vLLM lanes: --speculative-config mtp; GGUF lane: the *-MTP-GGUF file + --spec-type draft-mtp.
 REM Ready when vLLM prints "Application startup complete" / llama.cpp prints "server is listening".
 setlocal EnableDelayedExpansion
-set VLLM_IMG=vllm/vllm-openai:nightly
-set LCPP_IMG=ghcr.io/ggml-org/llama.cpp:server-cuda
+REM image tags are overridable via env (e.g. pin a digest): set VLLM_IMG / LCPP_IMG before running
+if not defined VLLM_IMG set VLLM_IMG=vllm/vllm-openai:nightly
+if not defined LCPP_IMG set LCPP_IMG=ghcr.io/ggml-org/llama.cpp:server-cuda
 REM ROOT = this script's own folder (portable; no hardcoded path). Strip trailing backslash.
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
@@ -103,11 +104,12 @@ python "%~dp0dash\serve.py"
 goto :eof
 
 :bench
-python "%~dp0bench.py" %2 %3 %4 %5 %6 %7 %8 %9
+REM forward ALL args after "bench" (not just %2..%9) so long flag sets aren't truncated
+for /f "tokens=1,*" %%a in ("%*") do python "%~dp0bench.py" %%b
 goto :eof
 
 :download
-docker run --rm --name qwen36-dl -v qwen36-hf:/hf -v %ROOT%:/workspace -e HF_HOME=/hf python:3.11-slim bash -c "pip install -q --no-cache-dir 'huggingface_hub>=0.26' && python /workspace/download_models.py"
+docker run --rm --name qwen36-dl -v qwen36-hf:/hf -v "%ROOT%:/workspace" -e HF_HOME=/hf python:3.11-slim bash -c "pip install -q --no-cache-dir 'huggingface_hub>=0.26' && python /workspace/download_models.py"
 goto :eof
 
 :status

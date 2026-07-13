@@ -19,6 +19,15 @@ import sys
 import time
 from pathlib import Path
 
+# Windows consoles/pipes default to cp1252, which can't encode the status glyphs and
+# raises UnicodeEncodeError mid-run (worst when stdout is piped, e.g. from the sweep
+# driver). Force UTF-8 so output never crashes the benchmark. (No-op if already UTF-8.)
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 sys.path.insert(0, str(Path(__file__).parent))
 from racer import PRESETS, lane_key, probe, stream_race
 
@@ -57,7 +66,8 @@ def load_rows():
 def current_lane():
     f = RESULTS / "current-lane.json"
     if not f.exists():
-        sys.exit("no results\\current-lane.json — serve a lane first (qwen36.cmd nvfp4 27b)")
+        sys.exit("no results/current-lane.json - serve a lane first "
+                 "(qwen36.cmd nvfp4 27b  /  ./qwen36.sh nvfp4 27b)")
     lane = json.loads(f.read_text(encoding="utf-8-sig"))
     models = probe(lane["base_url"])
     if models is None:
@@ -129,7 +139,7 @@ def main():
             print(f"{s['decode_tps']:7.1f} tok/s decode | {s['wall_tps']:6.1f} wall | "
                   f"ttft {s['ttft']:.2f}s | {s['tokens']} tok"
                   + ("  (count estimated)" if s["tokens_estimated"] else "")
-                  + (f"  ⚠ DEGENERATE: {deg}" if deg else ""))
+                  + (f"  !! DEGENERATE: {deg}" if deg else ""))
             if args.save_text:
                 od = RESULTS / "outputs"; od.mkdir(exist_ok=True)
                 (od / f"{key}_{name}_t{args.temp}_run{i+1}.txt").write_text(
@@ -144,10 +154,10 @@ def main():
             dts = [g["decode_tps"] for g in got]
             pick = {"best": max, "median": statistics.median, "mean": statistics.mean}[args.stat]
             head = pick(dts)
-            spread = f"[{min(dts):.1f}–{max(dts):.1f}]" if len(dts) > 1 else ""
+            spread = f"[{min(dts):.1f}-{max(dts):.1f}]" if len(dts) > 1 else ""
             rng = (max(dts) - min(dts)) / statistics.median(dts) * 100 if len(dts) > 1 else 0
             print(f"  {name:<5} {args.stat}: {head:.1f} tok/s decode  spread {spread} "
-                  f"(±{rng:.0f}% range)\n")
+                  f"(+/-{rng:.0f}% range)\n")
 
     rows.extend(new_rows)
     RESULTS.mkdir(exist_ok=True)

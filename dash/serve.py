@@ -224,9 +224,22 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
 
+class DashServer(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a SECOND instance silently bind an already-used port,
+    # then connections split randomly between the two (races appear/disappear per refresh).
+    # Disable reuse on Windows so a double-launch fails loudly; keep it on POSIX (avoids
+    # TIME_WAIT churn on quick restarts).
+    allow_reuse_address = (sys.platform != "win32")
+
+
 if __name__ == "__main__":
     RESULTS.mkdir(exist_ok=True)
     RACES.mkdir(parents=True, exist_ok=True)
+    try:
+        server = DashServer(("0.0.0.0", PORT), Handler)
+    except OSError as e:
+        sys.exit(f"could not bind port {PORT} ({e}). Is a dashboard already running? "
+                 f"Stop it, or free the port, and retry.")
     print(f"QWEN36 A/B DASHBOARD READY  ->  http://localhost:{PORT}")
-    print("serve a lane in another window (qwen36.cmd nvfp4 27b), then Start race.")
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    print("serve a lane in another window (qwen36.cmd / ./qwen36.sh nvfp4 27b), then Start race.")
+    server.serve_forever()

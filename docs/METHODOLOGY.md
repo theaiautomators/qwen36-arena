@@ -116,8 +116,17 @@ useful thing the video teaches.
 
 ## Environment
 
-RTX 5090 (32 GB, SM120) · Docker Desktop / WSL2 · `vllm/vllm-openai:nightly` `0.23.1rc1.dev1060`
-(2026-07-13) · `ghcr.io/ggml-org/llama.cpp:server-cuda`. WSL2/Docker-Desktop needs
+RTX 5090 (32 GB, SM120) · Docker Desktop / WSL2 · measured 2026-07-13. `nightly` and
+`server-cuda` are **moving tags**; the exact builds behind the numbers here were:
+
+- `vllm/vllm-openai:nightly` = `0.23.1rc1.dev1060` — digest
+  `sha256:ce3c3c81a19e6a4beddf398a6c93e0bf84c067c4f5ddef7f9a22f0ac2a74e457`
+- `ghcr.io/ggml-org/llama.cpp:server-cuda` — digest
+  `sha256:7b3d7834fc7307cb54f24f8869b67bfff276404c416452a48d11321bc36a81be`
+
+Pin these exactly with `VLLM_IMG=vllm/vllm-openai@sha256:ce3c… LCPP_IMG=ghcr.io/ggml-org/llama.cpp@sha256:7b3d… ./qwen36.sh …`
+(the launcher and suite honor those env vars). A later `nightly` will give different absolute
+tok/s; the *shape* of the finding is what's durable. WSL2/Docker-Desktop needs
 `VLLM_WSL2_ENABLE_PIN_MEMORY=1` or vLLM's GPU worker dies with "UVA is not available" (baked in;
 harmless on native Linux). Do **not** pair the llama.cpp lane with CUDA 13.2 (gibberish outputs —
 Unsloth docs); the pinned image is fine.

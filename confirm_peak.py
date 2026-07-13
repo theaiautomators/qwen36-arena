@@ -6,6 +6,7 @@ clock lock. warmup 2 (past vLLM's cold-run poison) + n=8 median. Writes to
 results\\confirm-results.json so the sweep data stays pristine. Prints the verdict.
 """
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -14,8 +15,11 @@ import urllib.request
 from pathlib import Path
 
 Q = Path(__file__).resolve().parent; RESULTS = Q / "results"
-VLLM_IMG = "vllm/vllm-openai:nightly"; LCPP_IMG = "ghcr.io/ggml-org/llama.cpp:server-cuda"
-OUT = "confirm-locked-results.json"   # clock-locked run (GPU 2400 / mem 13801 pinned)
+VLLM_IMG = os.environ.get("VLLM_IMG", "vllm/vllm-openai:nightly"); LCPP_IMG = os.environ.get("LCPP_IMG", "ghcr.io/ggml-org/llama.cpp:server-cuda")
+OUT = "confirm-results.json"   # separate file so the depth-sweep data stays pristine
+# For a clock-LOCKED confirm (pins the exact peak number), lock clocks yourself first, in an
+# admin/root shell:  nvidia-smi --lock-gpu-clocks=2400,2400 && nvidia-smi --lock-memory-clocks=<max>
+# (reset after with --reset-gpu-clocks / --reset-memory-clocks). This script doesn't lock them.
 
 
 def write_lane(lane, engine, model, mtp, port, quant):
@@ -55,7 +59,7 @@ def serve(lane, depth):
     return port
 
 
-def wait_ready(port, timeout=1200):
+def wait_ready(port, name, timeout=1200):
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
@@ -64,14 +68,21 @@ def wait_ready(port, timeout=1200):
                     return True
         except Exception:
             pass
+        r = subprocess.run(["docker", "ps", "-q", "--filter", f"name={name}"],
+                           capture_output=True, text=True)
+        if not r.stdout.strip():
+            print(f"### CONTAINER-EXITED {name} - failed to start (gguf lane needs the "
+                  f"model: run  ./qwen36.sh download  first).", flush=True)
+            return False
         time.sleep(6)
     return False
 
 
 for phase, lane, depth in [("A1", "nvfp4", 4), ("B", "gguf", 4), ("A2", "nvfp4", 4)]:
+    name = "qwen36-vllm" if lane == "nvfp4" else "qwen36-gguf"
     print(f"### SERVE {phase} {lane} mtp{depth}", flush=True)
     port = serve(lane, depth)
-    if not port or not wait_ready(port):
+    if not port or not wait_ready(port, name):
         print(f"### FAIL {phase} {lane} mtp{depth}", flush=True); continue
     print(f"### BENCH {phase} {lane} mtp{depth}", flush=True)
     subprocess.run([sys.executable, str(Q / "bench.py"), "--warmup", "2", "--repeats", "8",
@@ -86,7 +97,7 @@ def cell(key, preset):
     v = sorted(r["decode_tps"] for r in rows if r["key"] == key and r["preset"] == preset
                and not r.get("degenerate"))
     return v
-print("\n### CONFIRM VERDICT (unlocked clocks, back-to-back A-B-A) ###", flush=True)
+print("\n### CONFIRM VERDICT (back-to-back A-B-A) ###", flush=True)
 for preset in ("code", "math"):
     nv = sorted([r for r in rows if r["key"] == "nvfp4-27b-mtp4" and r["preset"] == preset
                  and not r.get("degenerate")], key=lambda r: r["ts"])

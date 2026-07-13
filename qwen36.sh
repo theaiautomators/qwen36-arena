@@ -12,6 +12,10 @@
 # speculative decoding, the solo-speed lever (sweep 1..6). Ready when vLLM prints "Application
 # startup complete" / llama.cpp prints "server is listening".
 set -euo pipefail
+# If someone runs this under Git Bash / MSYS on Windows, stop it rewriting POSIX paths in
+# docker args (-v …:/hf, --entrypoint /bin/bash). Harmless on real Linux/macOS. Note: the
+# supported Windows entry point is qwen36.cmd — this .sh targets Linux/macOS.
+export MSYS2_ARG_CONV_EXCL='*'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VLLM_IMG="${VLLM_IMG:-vllm/vllm-openai:nightly}"
 LCPP_IMG="${LCPP_IMG:-ghcr.io/ggml-org/llama.cpp:server-cuda}"
@@ -87,7 +91,7 @@ case "$LANE" in
     docker ps --filter name=qwen36 --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"; echo
     curl -s -m 2 http://localhost:8000/v1/models >/dev/null && echo "vLLM lane :8000 - up" || echo "vLLM lane :8000 - down"
     curl -s -m 2 http://localhost:8872/v1/models >/dev/null && echo "llama.cpp lane :8872 - up" || echo "llama.cpp lane :8872 - down"
-    [ -f "$ROOT/results/current-lane.json" ] && cat "$ROOT/results/current-lane.json" ;;
+    [ -f "$ROOT/results/current-lane.json" ] && cat "$ROOT/results/current-lane.json" || true ;;
   stop)
     docker rm -f qwen36-vllm qwen36-gguf 2>/dev/null || true ;;
   *)

@@ -2,10 +2,17 @@
 
     python mock_lane.py [port] [tok_per_s]     # default 8872, ~40 tok/s
 
-Then write results\\current-lane.json to point at it (or serve a real lane) and
-run `qwen36.cmd bench` / race it from the dashboard. Streams word chunks at a
-fixed cadence + a final usage chunk, mimicking vLLM/llama.cpp closely enough to
-exercise racer.py, bench.py and dash\\serve.py end-to-end.
+Then point the tools at it by writing results/current-lane.json (bench.py + the
+dashboard read this to know which lane is up). Copy-paste, adjusting port:
+
+    {"lane": "gguf", "engine": "llamacpp", "model": "MOCK", "size": "27b",
+     "mtp": 0, "port": 8872, "base_url": "http://localhost:8872/v1",
+     "served_name": "qwen36", "quant": "UD-Q4_K_XL", "started": "mock"}
+
+Then `python bench.py --presets code --repeats 2 --warmup 1`, or race it from the
+dashboard. Streams word chunks + a final usage chunk, mimicking vLLM/llama.cpp
+closely enough to exercise racer.py, bench.py and dash/serve.py end-to-end.
+(Caps output at 96 tokens regardless of max_tokens — it's a fixture, not a model.)
 """
 import json
 import sys

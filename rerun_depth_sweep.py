@@ -1,14 +1,17 @@
-"""Hardened re-run: per-engine MTP depth sweep + A-B-A drift bookend.
+"""MTP depth sweep - the headline experiment.
 
-Settles F4's superlative — does GGUF+MTP still beat NVFP4+MTP at EACH engine's best
-depth (not just depth 2)? Serves each (engine, depth) detached, health-polls, logs the
-VRAM footprint, then runs the hardened bench (warmup 1 + n=5 + median + save-text +
-degeneration gate). The two nvfp4-mtp2 bookends (first + last) test session thermal drift.
+Serves NVFP4 (vLLM) and GGUF (llama.cpp) at MTP draft depths 1-6, health-polls each,
+logs the VRAM footprint, then runs the hardened bench (warmup 1 + n=5 + median +
+save-text + degeneration gate). The two nvfp4-mtp2 bookends (measured first + last)
+test session thermal/warm-up drift. Then run  python analyze_rerun.py  for the verdict.
 
-Docker flags mirror qwen36.cmd exactly (qwen3_coder parser, max-num-seqs 64, fp8 KV, etc).
-Run detached via the Bash tool in the background; grep stdout for ### markers.
+Prerequisite: ./qwen36.sh download  (or qwen36.cmd download) - the GGUF lanes need the
+model present in the qwen36-hf volume. Takes ~40-60 min (12 serve cycles). Docker flags
+mirror the launcher exactly (qwen3_coder parser, max-num-seqs 64, fp8 KV, etc).
+Progress prints as  ### <marker>  lines.
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -17,8 +20,8 @@ from pathlib import Path
 
 Q = Path(__file__).resolve().parent
 RESULTS = Q / "results"
-VLLM_IMG = "vllm/vllm-openai:nightly"
-LCPP_IMG = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+VLLM_IMG = os.environ.get("VLLM_IMG", "vllm/vllm-openai:nightly")
+LCPP_IMG = os.environ.get("LCPP_IMG", "ghcr.io/ggml-org/llama.cpp:server-cuda")
 
 
 def write_lane(lane, engine, model, mtp, port, quant):
@@ -64,7 +67,13 @@ def serve(lane, depth):
     return port
 
 
-def wait_ready(port, timeout=1200):
+def container_running(name):
+    r = subprocess.run(["docker", "ps", "-q", "--filter", f"name={name}"],
+                       capture_output=True, text=True)
+    return bool(r.stdout.strip())
+
+
+def wait_ready(port, name, timeout=1200):
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
@@ -74,6 +83,13 @@ def wait_ready(port, timeout=1200):
                     return True
         except Exception:
             pass
+        # Fail fast instead of polling the full timeout if the container died - e.g. a
+        # GGUF lane with no model in the volume: llama-server -m '' exits instantly.
+        if not container_running(name):
+            print(f"### CONTAINER-EXITED {name} - it failed to start. If this is a gguf "
+                  f"lane, run  ./qwen36.sh download  first (the volume has no model).",
+                  flush=True)
+            return False
         time.sleep(6)
     return False
 
@@ -87,27 +103,32 @@ def footprint(phase, lane, depth):
         f.write(f"{phase},{lane},{depth},{line}\n")
 
 
-# depth sweep both engines + A-B-A bookend (nvfp4-mtp2 first & last)
+# full depth sweep 1-6 on both engines + A-B-A bookend (nvfp4-mtp2 first & last)
 CONFIGS = [
     ("nvfp4", 2, "bookendA"),
     ("nvfp4", 1, "sweep"), ("nvfp4", 3, "sweep"), ("nvfp4", 4, "sweep"),
-    ("gguf", 2, "sweep"),
-    ("gguf", 1, "sweep"), ("gguf", 3, "sweep"), ("gguf", 4, "sweep"),
+    ("nvfp4", 5, "sweep"), ("nvfp4", 6, "sweep"),
+    ("gguf", 2, "sweep"), ("gguf", 1, "sweep"), ("gguf", 3, "sweep"),
+    ("gguf", 4, "sweep"), ("gguf", 5, "sweep"), ("gguf", 6, "sweep"),
     ("nvfp4", 2, "bookendB"),
 ]
 
 for lane, depth, phase in CONFIGS:
+    name = "qwen36-vllm" if lane in ("nvfp4", "w4a16") else "qwen36-gguf"
     print(f"### SERVE {lane} mtp{depth} ({phase})", flush=True)
     port = serve(lane, depth)
-    if not port or not wait_ready(port):
-        print(f"### FAIL {lane} mtp{depth} ({phase}) — did not come up", flush=True)
+    if not port or not wait_ready(port, name):
+        print(f"### FAIL {lane} mtp{depth} ({phase}) - did not come up", flush=True)
         continue
     footprint(phase, lane, depth)
     print(f"### BENCH {lane} mtp{depth} ({phase})", flush=True)
-    subprocess.run([sys.executable, str(Q / "bench.py"), "--warmup", "1",
-                    "--repeats", "5", "--stat", "median", "--save-text",
-                    "--presets", "code,math"])
+    rc = subprocess.run([sys.executable, str(Q / "bench.py"), "--warmup", "1",
+                         "--repeats", "5", "--stat", "median", "--save-text",
+                         "--presets", "code,math"]).returncode
+    if rc != 0:
+        print(f"### BENCH-FAILED {lane} mtp{depth} ({phase}) rc={rc} - no rows written",
+              flush=True)
     print(f"### DONE {lane} mtp{depth} ({phase})", flush=True)
 
 subprocess.run(["docker", "rm", "-f", "qwen36-vllm", "qwen36-gguf"], capture_output=True)
-print("### RERUN COMPLETE", flush=True)
+print("### RERUN COMPLETE - now run  python analyze_rerun.py", flush=True)

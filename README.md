@@ -21,6 +21,7 @@ Unsloth's headline **"2.5× faster"** is a *batched-server* number (128 requests
 
 - **GPU:** the **NVFP4 lanes need Blackwell** (RTX 50-series / DGX Spark GB10 / B200 / B300) — W4A4 runs on FP4 tensor cores. The **GGUF lane runs on any CUDA GPU**. **32 GB VRAM** (RTX 5090) runs the 27B lanes as-is; the 35B-A3B MoE lanes also fit. Up-to-date host driver (the containers bring their own CUDA).
 - **Software:** Docker (Desktop + WSL2 backend on Windows · Engine + `nvidia-container-toolkit` on Linux) · `git` · any **Python 3** on the host for the bench/suite (stdlib only). No Hugging Face account or API keys — the models are public.
+- **Platform:** use `qwen36.cmd` on **Windows** and `./qwen36.sh` on **Linux** (don't run the `.sh` under Git Bash — MSYS mangles the Docker paths). **macOS** can't serve (`--gpus` is Linux-only) but *can* run the client tools — `bench.py`, the dashboard, `analyze_rerun.py` — against a lane served on a remote Linux/Windows box.
 - **Disk:** ~130 GB for the full model set (27B + 35B, NVFP4 + GGUF + baseline) into a shared Docker volume — or just the 27B lanes (~70 GB) for the headline finding. Plus ~28 GB vLLM image + ~4 GB llama.cpp image.
 
 ## Quickstart
@@ -36,12 +37,18 @@ Unsloth's headline **"2.5× faster"** is a *batched-server* number (128 requests
 
 One model on the GPU at a time (27B lanes each reserve ~30 GB). Swap lanes with `stop` → serve the next → race the same prompt → **Replay** in the dashboard.
 
-**Reproduce the headline (the MTP depth sweep):**
+The one-word `bench` defaults to a quick **best-of-2, no warmup** — fine for a smoke check, but it reads a bit high. To match the published table, pass the hardened flags: `bench --warmup 1 --repeats 5 --stat median`.
+
+**Reproduce the headline (the MTP depth sweep):** — run `download` first (the GGUF lanes need
+the model in the volume; the vLLM lanes self-fetch on first serve).
 
 ```bash
-python3 rerun_depth_sweep.py     # serves nvfp4 & gguf at MTP depths 1–4 + drift bookend, ~25 min
+python3 rerun_depth_sweep.py     # serves nvfp4 & gguf at MTP depths 1–6 + drift bookend, ~40–60 min
 python3 analyze_rerun.py         # -> per-depth curve, best depth per engine, the verdict
 ```
+
+`analyze_rerun.py` also runs on the shipped `results/sample-depth-sweep.json` before you've done
+your own sweep — so you can see the expected output immediately.
 
 ## Measured results (RTX 5090, single user, greedy, 256 tokens, n=5 median)
 
@@ -63,7 +70,7 @@ Full methodology, the red-team that caught the depth-2 artifact, and the on-came
 - **Single-user, batch-1 numbers.** The whole rig measures what one person at a keyboard feels. Unsloth's "2.5×" is *batched throughput* (128 concurrent, on a B200, vs W4A16) — a real but different axis. Solo, the quant is a wash; MTP depth is the win.
 - **Exact peaks wobble ±5–8%** — it's vLLM **engine warm-up** (the first requests ramp as CUDA graphs / autotune settle), not GPU boost. Locking clocks didn't remove it; a warmup discard + median does most of it. The *ranking* and the *math-task* numbers are rock-solid.
 - **Greedy (temp 0).** For predictable output (code/math) the MTP speedup is temperature-insensitive; open chat decays with temperature. Serve is thinking-off (Unsloth recommends ~temp 0.7 there).
-- **Nightly tooling.** vLLM NVFP4 + spec-decode is a nightly (its startup even warns it can't full-graph spec-decode with FlashInfer yet). Numbers reflect the pinned image tags; nightlies move.
+- **Moving image tags.** vLLM NVFP4 + spec-decode is a *nightly* (its startup even warns it can't full-graph spec-decode with FlashInfer yet), and `vllm/vllm-openai:nightly` / `llama.cpp:server-cuda` are **moving tags** — a clone in three months pulls different builds, and the exact tok/s will drift. The *shape* of the finding (depth is the lever; NVFP4 wins tuned) is robust; the exact numbers are dated 2026-07-13 (digests in [docs/METHODOLOGY.md](docs/METHODOLOGY.md#environment)). Override with `VLLM_IMG=… LCPP_IMG=… ./qwen36.sh …` to pin your own.
 - The dashboard binds `0.0.0.0:8870` with no auth — local use.
 
 ## Layout

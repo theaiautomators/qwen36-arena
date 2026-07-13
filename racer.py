@@ -16,7 +16,6 @@ import json
 import time
 import urllib.request
 
-LANE_FILE = "current-lane.json"   # written by qwen36.cmd at serve time
 
 PRESETS = {   # the DSpark video's three tasks, verbatim — continuity across videos
     "code": "Write a Python function that returns the longest palindromic substring "
