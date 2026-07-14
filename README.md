@@ -67,7 +67,7 @@ your own sweep — so you can see the expected output immediately.
 - **MTP is the lever**, and the two engines respond completely differently: NVFP4 **rewards deep speculation** (2×, 70→140 across depths 1→4); GGUF **saturates early** (~110–114) then **degrades** past depth 4 (85 at depth 6).
 - **At depth 2** (the naive default) GGUF edges NVFP4 (110 vs 98) — the trap. **At each engine's best depth (4), NVFP4 wins ~1.2–1.3×** (confirmed across the sweep, a back-to-back re-measure, and a clock-locked run; llama.cpp's own server timer agrees with our stopwatch to ≤0.4%).
 
-Full methodology, the red-team that caught the depth-2 artifact, and the on-camera-honest framing: **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)**.
+Full methodology, the red-team that caught the depth-2 artifact, and the on-camera-honest framing: **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** · the finding as a one-screen **[visual report](https://htmlpreview.github.io/?https://github.com/theaiautomators/qwen36-arena/blob/main/docs/depth-report.html)**.
 
 ## Honest caveats
 
