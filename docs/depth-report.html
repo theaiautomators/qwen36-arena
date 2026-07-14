@@ -93,7 +93,7 @@
 <body>
 <div class="shell">
   <p class="eyebrow"><span class="dot"></span> Qwen3.6-27B · RTX 5090 · local single-user decode</p>
-  <h1>The one knob that <span class="hl">doubles</span> your local speed — and nobody mentions it.</h1>
+  <h1>The one dial that <span class="hl">doubled</span> my local speed.</h1>
   <p class="sub">Turn on MTP (speculative decoding) and both engines get faster — but <b>how much</b> depends
   entirely on the <b>draft depth</b>. Tune it, and the "2.5×-faster" NVFP4 model pulls clearly ahead. Leave it
   at the default, and you'd wrongly conclude the plain GGUF is faster.</p>
@@ -211,7 +211,7 @@
       <li><b class="warn">Exact peak wobbles ±~5–8%</b> (NVFP4 code ~130–140) — it's <b>vLLM engine warm-up</b>, not GPU boost (locking the clocks didn't remove it; more warm-up requests do). The <b>math</b> number and the <b>ranking</b> are rock-solid.</li>
       <li><b>The "2.5× faster" headline is a different axis</b> — that's batched throughput on a data-centre B200 (128 users at once). Solo, on one card, it's a wash <i>until</i> you turn MTP depth up — which is the whole point of this chart.</li>
     </ul>
-    <footer>qwen36-arena · vLLM 0.23.1rc1 nightly · llama.cpp server-cuda · Unsloth Qwen3.6-27B NVFP4 (W4A4) &amp; UD-Q4_K_XL GGUF · measured 2026-07-13</footer>
+    <footer>Qwen36Bench · vLLM 0.23.1rc1 nightly · llama.cpp server-cuda · Unsloth Qwen3.6-27B NVFP4 (W4A4) &amp; UD-Q4_K_XL GGUF · measured 2026-07-13</footer>
   </div>
 </div>
 </body>

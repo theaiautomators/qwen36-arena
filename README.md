@@ -1,10 +1,12 @@
 # Qwen36 Arena — NVFP4 vs GGUF on one GPU, honestly
 
-Race Unsloth's **NVFP4** Qwen3.6-27B (on **vLLM**) against the **GGUF** you already run (on **llama.cpp**) — same model, same prompts, one client-side stopwatch, one consumer GPU. Then sweep the one knob that actually decides the winner: **MTP draft depth**.
+Race Unsloth's **NVFP4** Qwen3.6-27B (on **vLLM**) against the **GGUF** you already run (on **llama.cpp**) — same model, same prompts, one client-side stopwatch, one consumer GPU. Then sweep the one dial that actually decides the winner: **MTP draft depth**.
 
 Built for a video by [The AI Automators](https://www.youtube.com/@TheAiAutomators); published so anyone can reproduce the numbers. Tested 2026-07-13 on an **RTX 5090 (32 GB)**, Docker Desktop/WSL2, `vllm/vllm-openai:nightly` (`0.23.1rc1.dev1060`) and `ghcr.io/ggml-org/llama.cpp:server-cuda`.
 
-![The MTP-depth sweep: NVFP4 climbs to a depth-4 peak while GGUF plateaus and falls off — the ranking flips depending on the knob](docs/depth-sweep.png)
+![The qwen36-arena race dashboard: five Qwen3.6-27B lanes benched on one RTX 5090 — GGUF+MTP, GGUF, NVFP4+MTP, NVFP4, W4A16 — each streaming its output with its measured decode tok/s](docs/dashboard.png)
+
+*The live dashboard: serve a lane, race a prompt, and it records — swap lanes and **Replay side-by-side** re-runs every recording at true speed on one GPU.*
 
 ## The finding in one line
 
@@ -58,6 +60,8 @@ your own sweep — so you can see the expected output immediately.
 |---|---|---|---|---|---|---|
 | **NVFP4** · vLLM | 70 | 98 | 107 | **140** | 138 | 136 |
 | **GGUF** · llama.cpp | 93 | 110 | 109 | **114** | 109 | 85 |
+
+![Decode tok/s vs MTP draft depth: NVFP4 climbs to a depth-4 peak (140) while GGUF plateaus (~114) then falls off — the ranking flips depending on the dial](docs/depth-sweep.png)
 
 - **No MTP:** every lane (NVFP4 W4A4, NVIDIA W4A16, GGUF Q4) ties at **~64–68 tok/s** — single-user decode is memory-bandwidth-bound, so the quant flavour barely moves it. NVFP4-vs-W4A16 solo is **0.94×** (a wash; the "W4A4" checkpoint is actually ~7% heavier in VRAM).
 - **MTP is the lever**, and the two engines respond completely differently: NVFP4 **rewards deep speculation** (2×, 70→140 across depths 1→4); GGUF **saturates early** (~110–114) then **degrades** past depth 4 (85 at depth 6).
